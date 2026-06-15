@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 _TRUE = {"1", "true", "yes", "y", "on"}
 
@@ -20,10 +20,22 @@ def _int_env(name: str, default: int) -> int:
     return int(value)
 
 
+def _csv_env(name: str) -> list[str]:
+    value = os.getenv(name, "")
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
 @dataclass(frozen=True)
 class Config:
     api_token: str
     account_id: str
+    # Preferred mode: update a Cloudflare Zero Trust Access policy directly.
+    policy_id: str | None = None
+    extra_ip_ranges: list[str] = field(default_factory=list)
+    dns_names: list[str] = field(default_factory=list)
+    ip_lookup_enabled: bool = True
+    policy_replace_all: bool = False
+    # Legacy mode: update a Cloudflare account Rules List of kind='ip'.
     list_id: str | None = None
     list_name: str | None = None
     public_ip_url: str = "https://api64.ipify.org"
@@ -45,11 +57,13 @@ class Config:
             return
         missing = []
         if not self.api_token:
-            missing.append("CF_API_TOKEN")
+            missing.append("CF_API_TOKEN/CLOUDFLARE_API_KEY")
         if not self.account_id:
-            missing.append("CF_ACCOUNT_ID")
-        if not self.list_id and not self.list_name:
-            missing.append("CF_LIST_ID or CF_LIST_NAME")
+            missing.append("CF_ACCOUNT_ID/CLOUDFLARE_ACCOUNT_ID")
+        if not self.policy_id and not self.list_id and not self.list_name:
+            missing.append("CF_POLICY_ID/CLOUDFLARE_POLICY_ID or CF_LIST_ID/CF_LIST_NAME")
+        if not self.ip_lookup_enabled and not self.extra_ip_ranges and not self.dns_names:
+            missing.append("at least one IP source: IP lookup, IP_RANGE, or IP_FROM_DNS")
         if missing:
             raise ValueError("Missing required environment/config values: " + ", ".join(missing))
         if self.interval_seconds < 30:
@@ -57,9 +71,21 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
+        interval = os.getenv("CHECK_INTERVAL_SECONDS")
+        update_minutes = os.getenv("UPDATE_INTERVAL_MINUTES")
+        if (interval is None or interval.strip() == "") and update_minutes and update_minutes.strip():
+            interval_seconds = int(update_minutes) * 60
+        else:
+            interval_seconds = _int_env("CHECK_INTERVAL_SECONDS", 300)
+
         cfg = cls(
-            api_token=os.getenv("CF_API_TOKEN", ""),
-            account_id=os.getenv("CF_ACCOUNT_ID", ""),
+            api_token=os.getenv("CF_API_TOKEN") or os.getenv("CLOUDFLARE_API_KEY", ""),
+            account_id=os.getenv("CF_ACCOUNT_ID") or os.getenv("CLOUDFLARE_ACCOUNT_ID", ""),
+            policy_id=os.getenv("CF_POLICY_ID") or os.getenv("CLOUDFLARE_POLICY_ID") or None,
+            extra_ip_ranges=_csv_env("IP_RANGE") or _csv_env("EXTRA_IP_RANGES"),
+            dns_names=_csv_env("IP_FROM_DNS") or _csv_env("DNS_NAMES"),
+            ip_lookup_enabled=_bool_env("IP_LOOKUP_ENABLED", True),
+            policy_replace_all=_bool_env("POLICY_REPLACE_ALL", False),
             list_id=os.getenv("CF_LIST_ID") or None,
             list_name=os.getenv("CF_LIST_NAME") or os.getenv("CF_ALLOWLIST_NAME") or None,
             public_ip_url=os.getenv("PUBLIC_IP_URL", "https://api64.ipify.org"),
@@ -71,7 +97,7 @@ class Config:
             dry_run=_bool_env("DRY_RUN", False),
             disabled=_bool_env("DISABLED", False),
             once=_bool_env("ONCE", False),
-            interval_seconds=_int_env("CHECK_INTERVAL_SECONDS", 300),
+            interval_seconds=interval_seconds,
             wait_for_completion=_bool_env("WAIT_FOR_COMPLETION", True),
             operation_poll_seconds=float(os.getenv("OPERATION_POLL_SECONDS", "2.0")),
             operation_poll_attempts=_int_env("OPERATION_POLL_ATTEMPTS", 15),

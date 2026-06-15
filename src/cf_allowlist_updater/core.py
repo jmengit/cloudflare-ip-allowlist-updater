@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ipaddress
 import json
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -52,12 +54,36 @@ class CloudflareClient:
         return data
 
     def get_public_ip(self, endpoint: str) -> str:
-        req = urllib.request.Request(endpoint, headers={"User-Agent": "cf-allowlist-updater/0.1"})
+        req = urllib.request.Request(endpoint, headers={"User-Agent": "cf-allowlist-updater/0.2"})
         try:
             with urllib.request.urlopen(req, timeout=self.cfg.request_timeout_seconds) as resp:
                 return resp.read().decode("utf-8").strip()
         except urllib.error.URLError as exc:
             raise CloudflareAPIError(f"Public IP lookup failed: {exc}") from exc
+
+    def resolve_dns_to_ips(self, name: str) -> list[str]:
+        try:
+            infos = socket.getaddrinfo(name, None, proto=socket.IPPROTO_TCP)
+        except socket.gaierror as exc:
+            raise CloudflareAPIError(f"Failed to resolve DNS {name!r}: {exc}") from exc
+        ips: list[str] = []
+        for info in infos:
+            ip = str(info[4][0])
+            if ip not in ips:
+                ips.append(ip)
+        return ips
+
+    def get_access_policy(self, policy_id: str) -> dict[str, Any]:
+        account = urllib.parse.quote(self.cfg.account_id, safe="")
+        policy = urllib.parse.quote(policy_id, safe="")
+        data = self._request("GET", f"/accounts/{account}/access/policies/{policy}")
+        return data.get("result", data)
+
+    def update_access_policy(self, policy_id: str, policy: dict[str, Any]) -> dict[str, Any]:
+        account = urllib.parse.quote(self.cfg.account_id, safe="")
+        policy_part = urllib.parse.quote(policy_id, safe="")
+        data = self._request("PUT", f"/accounts/{account}/access/policies/{policy_part}", policy)
+        return data.get("result", data)
 
     def resolve_list_id(self, list_id: str | None, list_name: str | None) -> str:
         if list_id:
@@ -105,6 +131,15 @@ class CloudflareClient:
         return data.get("result", data)
 
 
+def _dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    for value in values:
+        value = value.strip()
+        if value and value not in result:
+            result.append(value)
+    return result
+
+
 def normalize_ip_for_list(ip: str) -> str:
     ip = ip.strip()
     if "/" in ip:
@@ -112,6 +147,38 @@ def normalize_ip_for_list(ip: str) -> str:
     if ":" in ip:
         return f"{ip}/128"
     return f"{ip}/32"
+
+
+def normalize_ip_for_policy(ip: str) -> str:
+    ip = ip.strip()
+    if not ip:
+        raise ValueError("empty IP/range")
+    try:
+        if "/" in ip:
+            return str(ipaddress.ip_network(ip, strict=False))
+        return str(ipaddress.ip_address(ip))
+    except ValueError as exc:
+        raise ValueError(f"Invalid IP/range {ip!r}") from exc
+
+
+def build_policy_include(
+    existing_include: list[dict[str, Any]], *, ip_ranges: list[str], replace_all: bool
+) -> list[dict[str, Any]]:
+    new_ip_rules = [{"ip": {"ip": normalize_ip_for_policy(ip)}} for ip in _dedupe(ip_ranges)]
+    if replace_all:
+        return new_ip_rules
+    preserved = [rule for rule in existing_include if "ip" not in rule]
+    return preserved + new_ip_rules
+
+
+def collect_policy_ip_ranges(cfg: Config, client: CloudflareClient) -> list[str]:
+    ranges: list[str] = []
+    if cfg.ip_lookup_enabled:
+        ranges.append(normalize_ip_for_policy(client.get_public_ip(cfg.public_ip_url)))
+    ranges.extend(normalize_ip_for_policy(ip) for ip in cfg.extra_ip_ranges)
+    for dns_name in cfg.dns_names:
+        ranges.extend(normalize_ip_for_policy(ip) for ip in client.resolve_dns_to_ips(dns_name))
+    return _dedupe(ranges)
 
 
 def compute_replacement_items(
@@ -147,9 +214,36 @@ def wait_for_operation(cfg: Config, client: CloudflareClient, operation_id: str)
     return last
 
 
-def run_once(cfg: Config, client: CloudflareClient | None = None) -> dict[str, Any]:
-    cfg.validate()
-    client = client or CloudflareClient(cfg)
+def run_policy_once(cfg: Config, client: CloudflareClient) -> dict[str, Any]:
+    if not cfg.policy_id:
+        raise ValueError("policy mode requires CF_POLICY_ID/CLOUDFLARE_POLICY_ID")
+    ip_ranges = collect_policy_ip_ranges(cfg, client)
+    policy = client.get_access_policy(cfg.policy_id)
+    existing_include = policy.get("include") or []
+    if not isinstance(existing_include, list):
+        raise CloudflareAPIError("Cloudflare policy include field is not a list")
+    updated_policy = dict(policy)
+    updated_policy["include"] = build_policy_include(
+        existing_include,
+        ip_ranges=ip_ranges,
+        replace_all=cfg.policy_replace_all,
+    )
+
+    result: dict[str, Any] = {
+        "mode": "policy",
+        "policy_id": cfg.policy_id,
+        "ip_ranges": ip_ranges,
+        "include_count": len(updated_policy["include"]),
+        "dry_run": cfg.dry_run,
+    }
+    if cfg.dry_run:
+        result["policy"] = updated_policy
+        return result
+    result["policy_result"] = client.update_access_policy(cfg.policy_id, updated_policy)
+    return result
+
+
+def run_list_once(cfg: Config, client: CloudflareClient) -> dict[str, Any]:
     raw_ip = client.get_public_ip(cfg.public_ip_url)
     current_ip = normalize_ip_for_list(raw_ip)
     list_id = client.resolve_list_id(cfg.list_id, cfg.list_name)
@@ -163,6 +257,7 @@ def run_once(cfg: Config, client: CloudflareClient | None = None) -> dict[str, A
     )
 
     result: dict[str, Any] = {
+        "mode": "list",
         "ip": current_ip,
         "list_id": list_id,
         "existing_count": len(existing),
@@ -178,3 +273,11 @@ def run_once(cfg: Config, client: CloudflareClient | None = None) -> dict[str, A
     if operation_id and cfg.wait_for_completion:
         result["operation"] = wait_for_operation(cfg, client, operation_id)
     return result
+
+
+def run_once(cfg: Config, client: CloudflareClient | None = None) -> dict[str, Any]:
+    cfg.validate()
+    client = client or CloudflareClient(cfg)
+    if cfg.policy_id:
+        return run_policy_once(cfg, client)
+    return run_list_once(cfg, client)

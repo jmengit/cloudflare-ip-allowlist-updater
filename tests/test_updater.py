@@ -1,7 +1,13 @@
 import pytest
 
 from cf_allowlist_updater.config import Config
-from cf_allowlist_updater.core import compute_replacement_items, normalize_ip_for_list, run_once
+from cf_allowlist_updater.core import (
+    build_policy_include,
+    compute_replacement_items,
+    normalize_ip_for_list,
+    normalize_ip_for_policy,
+    run_once,
+)
 
 
 def test_normalize_ipv4_adds_32_cidr():
@@ -10,6 +16,11 @@ def test_normalize_ipv4_adds_32_cidr():
 
 def test_normalize_ipv6_adds_128_cidr():
     assert normalize_ip_for_list("2001:db8::1") == "2001:db8::1/128"
+
+
+def test_normalize_ip_for_policy_keeps_plain_ip_like_tiippex():
+    assert normalize_ip_for_policy("203.0.113.7") == "203.0.113.7"
+    assert normalize_ip_for_policy("203.0.113.0/24") == "203.0.113.0/24"
 
 
 def test_compute_replacement_items_preserves_unmanaged_and_replaces_managed():
@@ -44,6 +55,35 @@ def test_compute_replacement_items_replace_all_drops_unmanaged():
     )
 
     assert result == [{"ip": "203.0.113.7/32", "comment": "home"}]
+
+
+def test_build_policy_include_preserves_non_ip_rules_and_replaces_ip_rules():
+    existing_include = [
+        {"email": {"email": "me@example.com"}},
+        {"ip": {"ip": "198.51.100.20"}},
+        {"everyone": {}},
+    ]
+
+    result = build_policy_include(
+        existing_include,
+        ip_ranges=["203.0.113.7", "203.0.113.0/24"],
+        replace_all=False,
+    )
+
+    assert result == [
+        {"email": {"email": "me@example.com"}},
+        {"everyone": {}},
+        {"ip": {"ip": "203.0.113.7"}},
+        {"ip": {"ip": "203.0.113.0/24"}},
+    ]
+
+
+def test_build_policy_include_replace_all_matches_direct_policy_only_mode():
+    existing_include = [{"email": {"email": "me@example.com"}}]
+
+    result = build_policy_include(existing_include, ip_ranges=["203.0.113.7"], replace_all=True)
+
+    assert result == [{"ip": {"ip": "203.0.113.7"}}]
 
 
 class FakeCloudflare:
@@ -86,6 +126,7 @@ def test_run_once_updates_cloudflare_list_when_ip_changes():
 
     result = run_once(cfg, client=client)
 
+    assert result["mode"] == "list"
     assert result["ip"] == "203.0.113.7/32"
     assert result["operation_id"] == "op-123"
     assert client.updated == [{"ip": "203.0.113.7/32", "comment": "managed-by=cf-ip-allowlist-updater home"}]
@@ -105,6 +146,59 @@ def test_run_once_dry_run_does_not_update():
 
     assert result["dry_run"] is True
     assert client.updated is None
+
+
+class FakePolicyCloudflare:
+    def __init__(self):
+        self.updated_policy = None
+
+    def get_public_ip(self, endpoint):
+        assert endpoint == "https://example.test/ip"
+        return "203.0.113.7"
+
+    def resolve_dns_to_ips(self, name):
+        assert name == "vpn.example.test"
+        return ["198.51.100.9"]
+
+    def get_access_policy(self, policy_id):
+        assert policy_id == "policy-123"
+        return {
+            "id": "policy-123",
+            "name": "Home IP bypass",
+            "decision": "bypass",
+            "include": [
+                {"email": {"email": "me@example.com"}},
+                {"ip": {"ip": "198.51.100.20"}},
+            ],
+        }
+
+    def update_access_policy(self, policy_id, policy):
+        assert policy_id == "policy-123"
+        self.updated_policy = policy
+        return {"id": "policy-123"}
+
+
+def test_run_once_updates_access_policy_like_tiippex_but_preserves_non_ip_rules():
+    client = FakePolicyCloudflare()
+    cfg = Config(
+        api_token="token",
+        account_id="acct",
+        policy_id="policy-123",
+        public_ip_url="https://example.test/ip",
+        extra_ip_ranges=["203.0.113.0/24"],
+        dns_names=["vpn.example.test"],
+    )
+
+    result = run_once(cfg, client=client)
+
+    assert result["mode"] == "policy"
+    assert result["ip_ranges"] == ["203.0.113.7", "203.0.113.0/24", "198.51.100.9"]
+    assert client.updated_policy["include"] == [
+        {"email": {"email": "me@example.com"}},
+        {"ip": {"ip": "203.0.113.7"}},
+        {"ip": {"ip": "203.0.113.0/24"}},
+        {"ip": {"ip": "198.51.100.9"}},
+    ]
 
 
 def test_disabled_config_allows_missing_cloudflare_credentials():
