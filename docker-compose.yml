@@ -1,0 +1,16 @@
+services:
+  cloudflare-ip-allowlist-updater:
+    image: ghcr.io/jmengit/cloudflare-ip-allowlist-updater:latest
+    container_name: cloudflare-ip-allowlist-updater
+    restart: unless-stopped
+    environment:
+      CF_API_TOKEN: ${CF_API_TOKEN:?set CF_API_TOKEN}
+      CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:?set CF_ACCOUNT_ID}
+      CF_LIST_NAME: ${CF_LIST_NAME:-home_allowlist}
+      CF_LIST_ITEM_COMMENT: ${CF_LIST_ITEM_COMMENT:-managed-by=cf-ip-allowlist-updater home}
+      MANAGED_COMMENT_PREFIX: ${MANAGED_COMMENT_PREFIX:-managed-by=cf-ip-allowlist-updater}
+      CHECK_INTERVAL_SECONDS: ${CHECK_INTERVAL_SECONDS:-300}
+      REPLACE_ALL: ${REPLACE_ALL:-false}
+      DRY_RUN: ${DRY_RUN:-false}
+      DISABLED: ${DISABLED:-true}
+      ONCE: ${ONCE:-false}
