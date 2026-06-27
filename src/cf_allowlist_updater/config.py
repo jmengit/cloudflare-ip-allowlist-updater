@@ -52,6 +52,7 @@ class Config:
     operation_poll_attempts: int = 15
     request_timeout_seconds: int = 30
     api_base_url: str = "https://api.cloudflare.com/client/v4"
+    failure_window_seconds: int = 86400
 
     def validate(self) -> None:
         if self.disabled:
@@ -105,6 +106,7 @@ class Config:
             operation_poll_attempts=_int_env("OPERATION_POLL_ATTEMPTS", 15),
             request_timeout_seconds=_int_env("REQUEST_TIMEOUT_SECONDS", 30),
             api_base_url=os.getenv("CF_API_BASE_URL", "https://api.cloudflare.com/client/v4"),
+            failure_window_seconds=_int_env("FAILURE_WINDOW_HOURS", 24) * 3600,
         )
         cfg.validate()
         return cfg

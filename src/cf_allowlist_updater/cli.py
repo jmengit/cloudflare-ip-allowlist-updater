@@ -29,10 +29,12 @@ def main() -> int:
                 time.sleep(cfg.interval_seconds)
             return 0
         last_exit_code = 0
+        last_success = time.monotonic()
         while True:
             try:
                 result = run_once(cfg)
                 print(json.dumps(_redact(result), sort_keys=True), flush=True)
+                last_success = time.monotonic()
                 last_exit_code = 0
             except (CloudflareAPIError, ValueError) as exc:
                 print(f"ERROR: {exc}", file=sys.stderr, flush=True)
@@ -43,6 +45,15 @@ def main() -> int:
                 }
                 print(json.dumps(skip, sort_keys=True), flush=True)
                 last_exit_code = 1
+                elapsed = time.monotonic() - last_success
+                if elapsed >= cfg.failure_window_seconds:
+                    print(
+                        f"FATAL: no successful update in {elapsed / 3600:.1f}h "
+                        f"(limit {cfg.failure_window_seconds / 3600:.0f}h). Exiting.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    return 1
             if cfg.once:
                 return last_exit_code
             time.sleep(cfg.interval_seconds)
