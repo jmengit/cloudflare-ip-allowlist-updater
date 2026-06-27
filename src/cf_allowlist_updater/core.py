@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import json
+import random
 import socket
 import time
 import urllib.error
@@ -14,6 +15,14 @@ from .config import Config
 
 class CloudflareAPIError(RuntimeError):
     pass
+
+
+DEFAULT_PUBLIC_IP_URLS = [
+    "https://api64.ipify.org",
+    "https://icanhazip.com",
+    "https://checkip.amazonaws.com",
+    "https://ifconfig.me/ip",
+]
 
 
 class CloudflareClient:
@@ -53,13 +62,50 @@ class CloudflareClient:
             raise CloudflareAPIError(f"Cloudflare API error: {data.get('errors') or data}")
         return data
 
-    def get_public_ip(self, endpoint: str) -> str:
-        req = urllib.request.Request(endpoint, headers={"User-Agent": "cf-allowlist-updater/0.2"})
-        try:
-            with urllib.request.urlopen(req, timeout=self.cfg.request_timeout_seconds) as resp:
-                return resp.read().decode("utf-8").strip()
-        except urllib.error.URLError as exc:
-            raise CloudflareAPIError(f"Public IP lookup failed: {exc}") from exc
+    def get_public_ip(self, endpoint: str, fallback_urls: list[str] | None = None) -> str:
+        """Fetch public IP with retry + fallback endpoints.
+
+        Tries *endpoint* with up to cfg.ip_lookup_retries exponential-backoff
+        attempts.  If all fail, tries each URL in *fallback_urls* (or
+        DEFAULT_PUBLIC_IP_URLS minus *endpoint*) once.  Raises
+        CloudflareAPIError only when every attempt on every URL has failed.
+        """
+        primary = endpoint.rstrip("/")
+        fallbacks = fallback_urls or [
+            u for u in DEFAULT_PUBLIC_IP_URLS if u.rstrip("/") != primary
+        ]
+        candidates: list[tuple[str, int]] = [(primary, self.cfg.ip_lookup_retries)]
+        candidates.extend((fb, 1) for fb in fallbacks)
+
+        errors: list[str] = []
+        for url, max_attempts in candidates:
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    req = urllib.request.Request(
+                        url, headers={"User-Agent": "cf-allowlist-updater/0.2"}
+                    )
+                    with urllib.request.urlopen(
+                        req, timeout=self.cfg.request_timeout_seconds
+                    ) as resp:
+                        ip = resp.read().decode("utf-8").strip()
+                        if ip:
+                            return ip
+                        errors.append(f"{url}: empty response")
+                except urllib.error.URLError as exc:
+                    msg = f"{url}: {exc}"
+                    errors.append(msg)
+                    if attempt < max_attempts:
+                        delay = min(2**attempt + random.uniform(0, 1), 15)
+                        print(
+                            f"  retry {attempt}/{max_attempts} after {delay:.1f}s — {exc}",
+                            flush=True,
+                        )
+                        time.sleep(delay)
+
+        raise CloudflareAPIError(
+            f"Public IP lookup failed after {len(candidates)} endpoint(s): "
+            f"{'; '.join(errors)}"
+        )
 
     def resolve_dns_to_ips(self, name: str) -> list[str]:
         try:

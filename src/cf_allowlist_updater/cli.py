@@ -28,14 +28,26 @@ def main() -> int:
             while not cfg.once:
                 time.sleep(cfg.interval_seconds)
             return 0
+        last_exit_code = 0
         while True:
-            result = run_once(cfg)
-            print(json.dumps(_redact(result), sort_keys=True), flush=True)
+            try:
+                result = run_once(cfg)
+                print(json.dumps(_redact(result), sort_keys=True), flush=True)
+                last_exit_code = 0
+            except (CloudflareAPIError, ValueError) as exc:
+                print(f"ERROR: {exc}", file=sys.stderr, flush=True)
+                skip = {
+                    "error": str(exc),
+                    "mode": "skip",
+                    "wait_seconds": cfg.interval_seconds,
+                }
+                print(json.dumps(skip, sort_keys=True), flush=True)
+                last_exit_code = 1
             if cfg.once:
-                return 0
+                return last_exit_code
             time.sleep(cfg.interval_seconds)
-    except (CloudflareAPIError, ValueError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr, flush=True)
+    except Exception as exc:
+        print(f"FATAL: {exc}", file=sys.stderr, flush=True)
         return 1
 
 

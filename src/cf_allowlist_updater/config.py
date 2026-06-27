@@ -39,6 +39,7 @@ class Config:
     list_id: str | None = None
     list_name: str | None = None
     public_ip_url: str = "https://api64.ipify.org"
+    ip_lookup_retries: int = 3
     comment: str = "managed-by=cf-ip-allowlist-updater"
     managed_comment_prefix: str = "managed-by=cf-ip-allowlist-updater"
     replace_all: bool = False
@@ -89,6 +90,7 @@ class Config:
             list_id=os.getenv("CF_LIST_ID") or None,
             list_name=os.getenv("CF_LIST_NAME") or os.getenv("CF_ALLOWLIST_NAME") or None,
             public_ip_url=os.getenv("PUBLIC_IP_URL", "https://api64.ipify.org"),
+            ip_lookup_retries=_int_env("IP_LOOKUP_RETRIES", 3),
             comment=os.getenv("CF_LIST_ITEM_COMMENT", "managed-by=cf-ip-allowlist-updater"),
             managed_comment_prefix=os.getenv(
                 "MANAGED_COMMENT_PREFIX", "managed-by=cf-ip-allowlist-updater"
