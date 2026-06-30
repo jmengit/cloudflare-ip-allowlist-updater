@@ -6,6 +6,7 @@ from cf_allowlist_updater.core import (
     compute_replacement_items,
     normalize_ip_for_list,
     normalize_ip_for_policy,
+    public_ip_lookup_urls,
     run_once,
 )
 
@@ -21,6 +22,23 @@ def test_normalize_ipv6_adds_128_cidr():
 def test_normalize_ip_for_policy_keeps_plain_ip_like_tiippex():
     assert normalize_ip_for_policy("203.0.113.7") == "203.0.113.7"
     assert normalize_ip_for_policy("203.0.113.0/24") == "203.0.113.0/24"
+
+
+def test_public_ip_lookup_urls_supports_env_order_and_builtin_fallbacks():
+    cfg = Config(
+        api_token="token",
+        account_id="acct",
+        list_name="home_allowlist",
+        public_ip_url="https://legacy.example/ip",
+        public_ip_urls=["https://primary.example/ip", "https://checkip.amazonaws.com/"],
+    )
+
+    assert public_ip_lookup_urls(cfg)[:4] == [
+        "https://primary.example/ip",
+        "https://checkip.amazonaws.com",
+        "https://api64.ipify.org",
+        "https://api.ipify.org",
+    ]
 
 
 def test_compute_replacement_items_preserves_unmanaged_and_replaces_managed():
@@ -90,8 +108,9 @@ class FakeCloudflare:
     def __init__(self):
         self.updated = None
 
-    def get_public_ip(self, endpoint):
+    def get_public_ip(self, endpoint, fallback_urls=None):
         assert endpoint == "https://example.test/ip"
+        assert fallback_urls is not None
         return "203.0.113.7"
 
     def resolve_list_id(self, list_id, list_name):
@@ -152,8 +171,9 @@ class FakePolicyCloudflare:
     def __init__(self):
         self.updated_policy = None
 
-    def get_public_ip(self, endpoint):
+    def get_public_ip(self, endpoint, fallback_urls=None):
         assert endpoint == "https://example.test/ip"
+        assert fallback_urls is not None
         return "203.0.113.7"
 
     def resolve_dns_to_ips(self, name):

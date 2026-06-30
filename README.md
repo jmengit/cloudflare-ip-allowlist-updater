@@ -57,7 +57,8 @@ Scope it to the target account when possible.
 | `IP_RANGE` | no | `203.0.113.0/24,198.51.100.10` | Extra static IPs/CIDRs. |
 | `IP_FROM_DNS` | no | `home.example.com` | DNS names to resolve and include. |
 | `IP_LOOKUP_ENABLED` | no, default `true` | `true` | Add the container's current public IP. |
-| `PUBLIC_IP_URL` | no | `https://api64.ipify.org` | Plain-text IP endpoint. |
+| `PUBLIC_IP_URL` | no | `https://api64.ipify.org` | Primary plain-text IP endpoint. |
+| `PUBLIC_IP_URLS` | no | `https://api64.ipify.org,https://api.ipify.org,https://checkip.amazonaws.com` | Comma-separated public IP endpoints tried in order; built-in fallbacks are appended and duplicates removed. Overrides `PUBLIC_IP_URL`. |
 | `UPDATE_INTERVAL_MINUTES` | no | `15` | Tiippex-compatible interval. If unset, `CHECK_INTERVAL_SECONDS` is used. |
 | `CHECK_INTERVAL_SECONDS` | no, default `300` | `300` | Poll interval; minimum 30 seconds. |
 | `POLICY_REPLACE_ALL` | no, default `false` | `false` | If true, replace entire `include` with generated IP rules. |

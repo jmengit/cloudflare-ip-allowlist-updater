@@ -19,10 +19,22 @@ class CloudflareAPIError(RuntimeError):
 
 DEFAULT_PUBLIC_IP_URLS = [
     "https://api64.ipify.org",
+    "https://api.ipify.org",
     "https://icanhazip.com",
     "https://checkip.amazonaws.com",
     "https://ifconfig.me/ip",
 ]
+
+
+def public_ip_lookup_urls(cfg: Config) -> list[str]:
+    """Return de-duplicated public IP lookup URLs in attempt order."""
+    configured = cfg.public_ip_urls or [cfg.public_ip_url]
+    urls: list[str] = []
+    for url in [*configured, *DEFAULT_PUBLIC_IP_URLS]:
+        normalized = url.strip().rstrip("/")
+        if normalized and normalized not in urls:
+            urls.append(normalized)
+    return urls
 
 
 class CloudflareClient:
@@ -71,9 +83,7 @@ class CloudflareClient:
         CloudflareAPIError only when every attempt on every URL has failed.
         """
         primary = endpoint.rstrip("/")
-        fallbacks = fallback_urls or [
-            u for u in DEFAULT_PUBLIC_IP_URLS if u.rstrip("/") != primary
-        ]
+        fallbacks = fallback_urls or [u for u in DEFAULT_PUBLIC_IP_URLS if u.rstrip("/") != primary]
         candidates: list[tuple[str, int]] = [(primary, self.cfg.ip_lookup_retries)]
         candidates.extend((fb, 1) for fb in fallbacks)
 
@@ -220,7 +230,10 @@ def build_policy_include(
 def collect_policy_ip_ranges(cfg: Config, client: CloudflareClient) -> list[str]:
     ranges: list[str] = []
     if cfg.ip_lookup_enabled:
-        ranges.append(normalize_ip_for_policy(client.get_public_ip(cfg.public_ip_url)))
+        ip_urls = public_ip_lookup_urls(cfg)
+        ranges.append(
+            normalize_ip_for_policy(client.get_public_ip(ip_urls[0], ip_urls[1:]))
+        )
     ranges.extend(normalize_ip_for_policy(ip) for ip in cfg.extra_ip_ranges)
     for dns_name in cfg.dns_names:
         ranges.extend(normalize_ip_for_policy(ip) for ip in client.resolve_dns_to_ips(dns_name))
@@ -290,7 +303,8 @@ def run_policy_once(cfg: Config, client: CloudflareClient) -> dict[str, Any]:
 
 
 def run_list_once(cfg: Config, client: CloudflareClient) -> dict[str, Any]:
-    raw_ip = client.get_public_ip(cfg.public_ip_url)
+    ip_urls = public_ip_lookup_urls(cfg)
+    raw_ip = client.get_public_ip(ip_urls[0], ip_urls[1:])
     current_ip = normalize_ip_for_list(raw_ip)
     list_id = client.resolve_list_id(cfg.list_id, cfg.list_name)
     existing = client.get_list_items(list_id)

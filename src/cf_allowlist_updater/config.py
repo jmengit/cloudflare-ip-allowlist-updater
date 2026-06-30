@@ -25,6 +25,22 @@ def _csv_env(name: str) -> list[str]:
     return [part.strip() for part in value.split(",") if part.strip()]
 
 
+def _public_ip_urls_from_env() -> list[str]:
+    """Return ordered public IP lookup URLs from env.
+
+    PUBLIC_IP_URLS is an optional comma-separated override for environments
+    that want to control the fallback order.  PUBLIC_IP_URL remains the
+    single-primary legacy setting.
+    """
+    urls = _csv_env("PUBLIC_IP_URLS")
+    if urls:
+        return urls
+    single = os.getenv("PUBLIC_IP_URL", "").strip()
+    if single:
+        return [single]
+    return []
+
+
 @dataclass(frozen=True)
 class Config:
     api_token: str
@@ -39,6 +55,7 @@ class Config:
     list_id: str | None = None
     list_name: str | None = None
     public_ip_url: str = "https://api64.ipify.org"
+    public_ip_urls: list[str] = field(default_factory=list)
     ip_lookup_retries: int = 3
     comment: str = "managed-by=cf-ip-allowlist-updater"
     managed_comment_prefix: str = "managed-by=cf-ip-allowlist-updater"
@@ -91,6 +108,7 @@ class Config:
             list_id=os.getenv("CF_LIST_ID") or None,
             list_name=os.getenv("CF_LIST_NAME") or os.getenv("CF_ALLOWLIST_NAME") or None,
             public_ip_url=os.getenv("PUBLIC_IP_URL", "https://api64.ipify.org"),
+            public_ip_urls=_public_ip_urls_from_env(),
             ip_lookup_retries=_int_env("IP_LOOKUP_RETRIES", 3),
             comment=os.getenv("CF_LIST_ITEM_COMMENT", "managed-by=cf-ip-allowlist-updater"),
             managed_comment_prefix=os.getenv(
