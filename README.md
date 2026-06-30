@@ -59,8 +59,10 @@ Scope it to the target account when possible.
 | `IP_LOOKUP_ENABLED` | no, default `true` | `true` | Add the container's current public IP. |
 | `PUBLIC_IP_URL` | no | `https://api64.ipify.org` | Primary plain-text IP endpoint. |
 | `PUBLIC_IP_URLS` | no | `https://api64.ipify.org,https://api.ipify.org,https://checkip.amazonaws.com` | Comma-separated public IP endpoints tried in order; built-in fallbacks are appended and duplicates removed. Overrides `PUBLIC_IP_URL`. |
+| `IP_LOOKUP_RETRIES` | no, default `3` | `3` | Retry count for the primary public IP lookup endpoint before falling back. |
 | `UPDATE_INTERVAL_MINUTES` | no | `15` | Tiippex-compatible interval. If unset, `CHECK_INTERVAL_SECONDS` is used. |
 | `CHECK_INTERVAL_SECONDS` | no, default `300` | `300` | Poll interval; minimum 30 seconds. |
+| `FAILURE_WINDOW_HOURS` | no, default `24` | `24` | Exit non-zero if no successful Cloudflare update occurs within this window, so Docker/Unraid can restart or alert. |
 | `POLICY_REPLACE_ALL` | no, default `false` | `false` | If true, replace entire `include` with generated IP rules. |
 | `DRY_RUN` | no, default `false` | `true` | Compute but do not update Cloudflare. |
 | `DISABLED` | no, default `false` | `true` | Keep the container alive without calling Cloudflare. |
