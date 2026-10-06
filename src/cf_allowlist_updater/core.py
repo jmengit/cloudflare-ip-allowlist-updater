@@ -218,13 +218,29 @@ def normalize_ip_for_policy(ip: str) -> str:
 
 
 def build_policy_include(
-    existing_include: list[dict[str, Any]], *, ip_ranges: list[str], replace_all: bool
+    existing_include: list[dict[str, Any]],
+    *,
+    ip_ranges: list[str],
+    ip_mode: str,
+    replace_all: bool,
 ) -> list[dict[str, Any]]:
-    new_ip_rules = [{"ip": {"ip": normalize_ip_for_policy(ip)}} for ip in _dedupe(ip_ranges)]
+    """Build policy includes while independently controlling IP and non-IP rules."""
+    generated_ips = [normalize_ip_for_policy(ip) for ip in ip_ranges]
+    existing_ips: list[str] = []
+    if ip_mode == "append":
+        for rule in existing_include:
+            value = rule.get("ip")
+            if isinstance(value, dict) and value.get("ip"):
+                existing_ips.append(normalize_ip_for_policy(str(value["ip"])))
+    elif ip_mode != "replace":
+        raise ValueError("POLICY_IP_MODE must be 'replace' or 'append'")
+
+    merged_ips = _dedupe([*existing_ips, *generated_ips])
+    ip_rules = [{"ip": {"ip": ip}} for ip in merged_ips]
     if replace_all:
-        return new_ip_rules
-    preserved = [rule for rule in existing_include if "ip" not in rule]
-    return preserved + new_ip_rules
+        return ip_rules
+    preserved_non_ip = [rule for rule in existing_include if "ip" not in rule]
+    return preserved_non_ip + ip_rules
 
 
 def collect_policy_ip_ranges(cfg: Config, client: CloudflareClient) -> list[str]:
@@ -285,13 +301,15 @@ def run_policy_once(cfg: Config, client: CloudflareClient) -> dict[str, Any]:
     updated_policy["include"] = build_policy_include(
         existing_include,
         ip_ranges=ip_ranges,
+        ip_mode=cfg.policy_ip_mode,
         replace_all=cfg.policy_replace_all,
     )
 
     result: dict[str, Any] = {
         "mode": "policy",
+        "policy_ip_mode": cfg.policy_ip_mode,
         "policy_id": cfg.policy_id,
-        "ip_ranges": ip_ranges,
+        "generated_ip_count": len(ip_ranges),
         "include_count": len(updated_policy["include"]),
         "dry_run": cfg.dry_run,
     }

@@ -12,8 +12,8 @@ Preferred v0.2+ policy mode:
 2. Optionally adds extra static IPs/CIDRs from `IP_RANGE`.
 3. Optionally resolves DNS names from `IP_FROM_DNS` and adds their resolved IPs.
 4. Fetches the Cloudflare Access policy identified by `CF_POLICY_ID` / `CLOUDFLARE_POLICY_ID`.
-5. Replaces the policy's IP include rules with the current IP set.
-6. Preserves non-IP include rules by default. Set `POLICY_REPLACE_ALL=true` if this policy should contain only the generated IP rules.
+5. Handles existing IP include rules according to `POLICY_IP_MODE`: `replace` (default) replaces them, while `append` preserves them and adds the generated IP set.
+6. Preserves non-IP include rules by default. Set `POLICY_REPLACE_ALL=true` to discard non-IP rules; this is independent of `POLICY_IP_MODE`.
 7. Updates the Access policy through Cloudflare's `/accounts/{account_id}/access/policies/{policy_id}` API.
 
 Legacy v0.1 list mode is still available if you provide `CF_LIST_ID` or `CF_LIST_NAME` and no policy ID, but policy mode is now the intended mode.
@@ -63,7 +63,8 @@ Scope it to the target account when possible.
 | `UPDATE_INTERVAL_MINUTES` | no | `15` | Tiippex-compatible interval. If unset, `CHECK_INTERVAL_SECONDS` is used. |
 | `CHECK_INTERVAL_SECONDS` | no, default `300` | `300` | Poll interval; minimum 30 seconds. |
 | `FAILURE_WINDOW_HOURS` | no, default `24` | `24` | Exit non-zero if no successful Cloudflare update occurs within this window, so Docker/Unraid can restart or alert. |
-| `POLICY_REPLACE_ALL` | no, default `false` | `false` | If true, replace entire `include` with generated IP rules. |
+| `POLICY_IP_MODE` | no, default `replace` | `append` | `replace` removes existing policy IP rules before adding generated IPs. `append` preserves existing IP rules, adds generated IPs, and deduplicates. Append mode intentionally retains old dynamic IPs. |
+| `POLICY_REPLACE_ALL` | no, default `false` | `false` | Controls non-IP rules only. `false` preserves email/everyone/service-token/etc. rules; `true` discards them. Independent of `POLICY_IP_MODE`. |
 | `DRY_RUN` | no, default `false` | `true` | Compute but do not update Cloudflare. |
 | `DISABLED` | no, default `false` | `true` | Keep the container alive without calling Cloudflare. |
 | `ONCE` | no, default `false` | `true` | Run once and exit. |

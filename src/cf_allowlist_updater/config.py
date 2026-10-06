@@ -50,6 +50,7 @@ class Config:
     extra_ip_ranges: list[str] = field(default_factory=list)
     dns_names: list[str] = field(default_factory=list)
     ip_lookup_enabled: bool = True
+    policy_ip_mode: str = "replace"
     policy_replace_all: bool = False
     # Legacy mode: update a Cloudflare account Rules List of kind='ip'.
     list_id: str | None = None
@@ -85,6 +86,8 @@ class Config:
             missing.append("at least one IP source: IP lookup, IP_RANGE, or IP_FROM_DNS")
         if missing:
             raise ValueError("Missing required environment/config values: " + ", ".join(missing))
+        if self.policy_ip_mode not in {"replace", "append"}:
+            raise ValueError("POLICY_IP_MODE must be 'replace' or 'append'")
         if self.interval_seconds < 30:
             raise ValueError("CHECK_INTERVAL_SECONDS must be at least 30")
 
@@ -104,6 +107,7 @@ class Config:
             extra_ip_ranges=_csv_env("IP_RANGE") or _csv_env("EXTRA_IP_RANGES"),
             dns_names=_csv_env("IP_FROM_DNS") or _csv_env("DNS_NAMES"),
             ip_lookup_enabled=_bool_env("IP_LOOKUP_ENABLED", True),
+            policy_ip_mode=os.getenv("POLICY_IP_MODE", "replace").strip().lower(),
             policy_replace_all=_bool_env("POLICY_REPLACE_ALL", False),
             list_id=os.getenv("CF_LIST_ID") or None,
             list_name=os.getenv("CF_LIST_NAME") or os.getenv("CF_ALLOWLIST_NAME") or None,

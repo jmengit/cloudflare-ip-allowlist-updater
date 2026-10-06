@@ -4,14 +4,32 @@ services:
     container_name: cloudflare-ip-allowlist-updater
     restart: unless-stopped
     environment:
+      # Cloudflare token with Account > Access: Apps and Policies > Edit.
       CF_API_TOKEN: ${CF_API_TOKEN:-replace-me}
+      # Cloudflare account and Access policy identifiers.
       CF_ACCOUNT_ID: ${CF_ACCOUNT_ID:-replace-me}
       CF_POLICY_ID: ${CF_POLICY_ID:-replace-me}
+      # true adds this container/network's current public IP.
       IP_LOOKUP_ENABLED: ${IP_LOOKUP_ENABLED:-true}
+      # Optional comma-separated fixed IP addresses or CIDRs.
       IP_RANGE: ${IP_RANGE:-}
+      # Optional comma-separated DNS names whose resolved IPs are added.
       IP_FROM_DNS: ${IP_FROM_DNS:-}
+      # Public-IP lookup endpoints in attempt order; built-in fallbacks follow.
+      PUBLIC_IP_URLS: ${PUBLIC_IP_URLS:-https://api64.ipify.org,https://api.ipify.org,https://checkip.amazonaws.com}
+      # Retries for the primary public-IP endpoint before fallback.
+      IP_LOOKUP_RETRIES: ${IP_LOOKUP_RETRIES:-3}
+      # Update cadence. CHECK_INTERVAL_SECONDS takes precedence when also set.
       UPDATE_INTERVAL_MINUTES: ${UPDATE_INTERVAL_MINUTES:-15}
+      # replace overwrites existing policy IPs; append preserves and deduplicates them.
+      POLICY_IP_MODE: ${POLICY_IP_MODE:-replace}
+      # Controls non-IP rules only: true discards them; false preserves them.
       POLICY_REPLACE_ALL: ${POLICY_REPLACE_ALL:-false}
+      # Exit after this many hours without a successful update.
+      FAILURE_WINDOW_HOURS: ${FAILURE_WINDOW_HOURS:-24}
+      # true computes/logs the proposed update without calling Cloudflare.
       DRY_RUN: ${DRY_RUN:-false}
+      # true keeps the container idle and makes no Cloudflare calls.
       DISABLED: ${DISABLED:-true}
+      # true performs one cycle and exits; false runs continuously.
       ONCE: ${ONCE:-false}

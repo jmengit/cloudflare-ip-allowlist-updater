@@ -85,6 +85,7 @@ def test_build_policy_include_preserves_non_ip_rules_and_replaces_ip_rules():
     result = build_policy_include(
         existing_include,
         ip_ranges=["203.0.113.7", "203.0.113.0/24"],
+        ip_mode="replace",
         replace_all=False,
     )
 
@@ -99,9 +100,64 @@ def test_build_policy_include_preserves_non_ip_rules_and_replaces_ip_rules():
 def test_build_policy_include_replace_all_matches_direct_policy_only_mode():
     existing_include = [{"email": {"email": "me@example.com"}}]
 
-    result = build_policy_include(existing_include, ip_ranges=["203.0.113.7"], replace_all=True)
+    result = build_policy_include(
+        existing_include, ip_ranges=["203.0.113.7"], ip_mode="replace", replace_all=True
+    )
 
     assert result == [{"ip": {"ip": "203.0.113.7"}}]
+
+
+def test_build_policy_include_append_preserves_existing_ips_and_deduplicates():
+    existing_include = [
+        {"email": {"email": "me@example.com"}},
+        {"ip": {"ip": "198.51.100.20"}},
+        {"ip": {"ip": "203.0.113.7"}},
+    ]
+
+    result = build_policy_include(
+        existing_include,
+        ip_ranges=["203.0.113.7", "203.0.113.0/24"],
+        ip_mode="append",
+        replace_all=False,
+    )
+
+    assert result == [
+        {"email": {"email": "me@example.com"}},
+        {"ip": {"ip": "198.51.100.20"}},
+        {"ip": {"ip": "203.0.113.7"}},
+        {"ip": {"ip": "203.0.113.0/24"}},
+    ]
+
+
+def test_build_policy_include_append_can_drop_non_ip_rules():
+    existing_include = [
+        {"email": {"email": "me@example.com"}},
+        {"ip": {"ip": "198.51.100.20"}},
+    ]
+
+    result = build_policy_include(
+        existing_include,
+        ip_ranges=["203.0.113.7"],
+        ip_mode="append",
+        replace_all=True,
+    )
+
+    assert result == [
+        {"ip": {"ip": "198.51.100.20"}},
+        {"ip": {"ip": "203.0.113.7"}},
+    ]
+
+
+def test_config_rejects_invalid_policy_ip_mode():
+    cfg = Config(
+        api_token="token",
+        account_id="acct",
+        policy_id="policy",
+        policy_ip_mode="merge-ish",
+    )
+
+    with pytest.raises(ValueError, match="POLICY_IP_MODE"):
+        cfg.validate()
 
 
 class FakeCloudflare:
@@ -212,7 +268,8 @@ def test_run_once_updates_access_policy_like_tiippex_but_preserves_non_ip_rules(
     result = run_once(cfg, client=client)
 
     assert result["mode"] == "policy"
-    assert result["ip_ranges"] == ["203.0.113.7", "203.0.113.0/24", "198.51.100.9"]
+    assert result["policy_ip_mode"] == "replace"
+    assert result["generated_ip_count"] == 3
     assert client.updated_policy["include"] == [
         {"email": {"email": "me@example.com"}},
         {"ip": {"ip": "203.0.113.7"}},
