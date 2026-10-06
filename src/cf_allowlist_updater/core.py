@@ -217,6 +217,20 @@ def normalize_ip_for_policy(ip: str) -> str:
         raise ValueError(f"Invalid IP/range {ip!r}") from exc
 
 
+def _dedupe_policy_ips(values: list[str]) -> list[str]:
+    """Deduplicate equivalent IP spellings, including host and host-CIDR forms."""
+    result: list[str] = []
+    seen: set[tuple[int, int, int]] = set()
+    for value in values:
+        normalized = normalize_ip_for_policy(value)
+        network = ipaddress.ip_network(normalized, strict=False)
+        key = (network.version, int(network.network_address), network.prefixlen)
+        if key not in seen:
+            seen.add(key)
+            result.append(normalized)
+    return result
+
+
 def build_policy_include(
     existing_include: list[dict[str, Any]],
     *,
@@ -235,7 +249,7 @@ def build_policy_include(
     elif ip_mode != "replace":
         raise ValueError("POLICY_IP_MODE must be 'replace' or 'append'")
 
-    merged_ips = _dedupe([*existing_ips, *generated_ips])
+    merged_ips = _dedupe_policy_ips([*existing_ips, *generated_ips])
     ip_rules = [{"ip": {"ip": ip}} for ip in merged_ips]
     if replace_all:
         return ip_rules

@@ -129,6 +129,25 @@ def test_build_policy_include_append_preserves_existing_ips_and_deduplicates():
     ]
 
 
+def test_build_policy_include_append_deduplicates_host_and_host_cidr_forms():
+    existing_include = [
+        {"ip": {"ip": "203.0.113.7/32"}},
+        {"ip": {"ip": "2001:db8::7/128"}},
+    ]
+
+    result = build_policy_include(
+        existing_include,
+        ip_ranges=["203.0.113.7", "2001:db8::7"],
+        ip_mode="append",
+        replace_all=False,
+    )
+
+    assert result == [
+        {"ip": {"ip": "203.0.113.7/32"}},
+        {"ip": {"ip": "2001:db8::7/128"}},
+    ]
+
+
 def test_build_policy_include_append_can_drop_non_ip_rules():
     existing_include = [
         {"email": {"email": "me@example.com"}},

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cf-allowlist-updater"
-version = "1.1.0"
+version = "1.1.1"
 description = "Dockerized updater for a Cloudflare Access policy from the container's current public IP."
 readme = "README.md"
 requires-python = ">=3.11"
