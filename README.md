@@ -68,6 +68,28 @@ Scope it to the target account when possible.
 | `DRY_RUN` | no, default `false` | `true` | Compute but do not update Cloudflare. |
 | `DISABLED` | no, default `false` | `true` | Keep the container alive without calling Cloudflare. |
 | `ONCE` | no, default `false` | `true` | Run once and exit. |
+| `HEALTH_STATE_FILE` | no, default `/tmp/cf-allowlist-updater/state.json` | `/tmp/state.json` | Where the loop records progress for the health probe. |
+| `HEALTH_MAX_AGE_SECONDS` | no, default `0` | `4200` | Maximum age of the last successful update before the container reports unhealthy. `0` derives it from the interval: `UPDATE_INTERVAL_MINUTES × 60 + 600`. |
+| `HEALTH_START_GRACE_SECONDS` | no, default `300` | `300` | How long after start the updater may wait for its first successful cycle before reporting unhealthy. |
+
+## Health check
+
+The image ships a `HEALTHCHECK` that runs `cf-allowlist-updater --health` every 60 seconds:
+
+```
+HEALTHCHECK --interval=60s --timeout=15s --start-period=5m --retries=3 \
+    CMD ["cf-allowlist-updater", "--health"]
+```
+
+The probe is functional, not a process liveness check. The loop rewrites a small JSON state file after every attempt, and `--health` reports healthy only when a **real Cloudflare update succeeded** within the allowed age (one interval plus ten minutes by default). A revoked token, a deleted policy, a wedged loop or an unreachable Cloudflare API all leave the process running while the policy silently goes stale; those are exactly the cases this catches. A probe that only greps the process would stay green through all of them.
+
+```bash
+docker inspect --format '{{.State.Health.Status}}' cf-policy-updater-sp
+docker inspect --format '{{json .State.Health.Log}}' cf-policy-updater-sp | tail -c 400
+# healthy: last successful update 252s ago (ips 71.86.156.16/32, policy da8fcd47-...)
+```
+
+`--health` reads the state file only, so it still works when the Cloudflare configuration is broken, and it never calls the Cloudflare API. Because the state lives in the container's `/tmp`, a restarted container keeps reporting the true age of the last success instead of resetting the clock.
 
 ## Docker
 
